@@ -1,42 +1,39 @@
+```mermaid
 classDiagram
-    %% Core Controller
+    %% The Brain
     class RaspberryPi4 {
+        +UART0 (GPIO 14/15)
+        +UART5 (GPIO 12/13)
         +I2C Bus 1 (GPIO 2/3)
-        +GPIO 5 (STEP)
-        +GPIO 6 (DIR)
-        +CSI Port
+        +I2C Bus 3 (GPIO 4/5)
     }
 
-    %% Motion Control
-    class TMC2208_Driver {
-        +VIO (3.3V Logic)
-        +VM (12V Motor Power)
-        +STEP/DIR Interface
-        +StealthChop Technology
+    %% The Y-Split Resistor Logic
+    class UART_Wiring_Node {
+        +1k Resistor
+        +Merge TX/RX
     }
 
-    class StepperMotor {
-        +Coil A
-        +Coil B
-        +Shaft Position
+    %% Left Axis System
+    class Motor_System_Left {
+        +TMC2208 (Addr 0)
+        +AS5600 (Addr 0x36)
     }
 
-    %% Feedback Loop
-    class AS5600_Encoder {
-        +I2C Interface (0x36)
-        +Magnetic Sensor
-        +12-bit Resolution
+    %% Right Axis System
+    class Motor_System_Right {
+        +TMC2208 (Addr 0)
+        +AS5600 (Addr 0x36)
     }
 
-    %% Vision
-    class GlobalShutterCam {
-        +Sony IMX296
-        +Global Shutter (No rolling artifacts)
-    }
+    %% Connections - Left Axis
+    RaspberryPi4 "I2C Bus 1" <..> Motor_System_Left : Position Data
+    RaspberryPi4 "GPIO 14 (TX)" --o UART_Wiring_Node : Signal Out
+    UART_Wiring_Node --|> "PDN_UART" Motor_System_Left : One-Wire Data
+    RaspberryPi4 "GPIO 15 (RX)" --|> "PDN_UART" Motor_System_Left : Read Reply
 
-    %% Connections
-    RaspberryPi4 "GPIO 5/6" --> "STEP/DIR" TMC2208_Driver : Motion Commands
-    RaspberryPi4 "I2C Bus 1" <..> "I2C" AS5600_Encoder : Position Read (Feedback)
-    RaspberryPi4 "CSI Port" <..> GlobalShutterCam : High-Speed Frames
-    TMC2208_Driver "Motor Out" --> StepperMotor : Drive Current
-    StepperMotor "Shaft" ..> AS5600_Encoder : Magnetic Field Rotation
+    %% Connections - Right Axis
+    RaspberryPi4 "I2C Bus 3" <..> Motor_System_Right : Position Data
+    RaspberryPi4 "GPIO 12 (TX)" --o UART_Wiring_Node : Signal Out
+    UART_Wiring_Node --|> "PDN_UART" Motor_System_Right : One-Wire Data
+    RaspberryPi4 "GPIO 13 (RX)" --|> "PDN_UART" Motor_System_Right : Read Reply

@@ -1,38 +1,39 @@
-classDiagram
-    %% The Brain
-    class RaspberryPi4 {
-        +I2C Bus 1 (GPIO 2/3)
-        +I2C Bus 3 (GPIO 4/5)
-        +GPIO Bank A (Left Motor)
-        +GPIO Bank B (Right Motor)
-        +CSI Port
-    }
+# System Architecture: UART Precision Control
 
-    %% Axis 1: Left
-    class Motor_Left_System {
-        +TMC2208 Driver
-        +NEMA 17 Motor
-        +AS5600 Encoder (Addr 0x36)
-    }
+## 1. Hardware Bill of Materials
+* **Controller:** Raspberry Pi 4 Model B
+* **Drivers:** 2x TMC2208 (UART Mode)
+* **Encoders:** 2x AS5600 (I2C Mode)
+* **Components:** 2x 1kΩ Resistors (Crucial for UART wiring)
+* **Power:** 24V PSU (Motors) + 5V/3A PSU (Pi)
 
-    %% Axis 2: Right
-    class Motor_Right_System {
-        +TMC2208 Driver
-        +NEMA 17 Motor
-        +AS5600 Encoder (Addr 0x36)
-    }
+## 2. Communication Strategy
+* **Motor Control (UART):**
+    * **Left Motor:** Uses default UART0 (`/dev/serial0`).
+    * **Right Motor:** Uses hardware UART5 (`/dev/ttyAMA1`).
+    * **Protocol:** Single-Wire UART (Requires 1k resistor on TX line).
+    * **Baudrate:** 115200.
+* **Encoder Feedback (I2C):**
+    * **Left Encoder:** Bus 1 (Default).
+    * **Right Encoder:** Bus 3 (Overlay).
 
-    %% Vision
-    class GlobalShutterCam {
-        +Sony IMX296
-        +60 FPS
-    }
+## 3. Pinout & Wiring Map
+| Device | Signal | Physical Pin | BCM (GPIO) | Connection Note |
+| :--- | :--- | :--- | :--- | :--- |
+| **Left Encoder** | SDA | 3 | GPIO 2 | I2C Bus 1 |
+| **Left Encoder** | SCL | 5 | GPIO 3 | I2C Bus 1 |
+| **Left Motor** | RX | 10 | GPIO 15 | Direct to PDN_UART |
+| **Left Motor** | TX | 8 | GPIO 14 | **Via 1kΩ Resistor** to PDN_UART |
+| **Right Encoder**| SDA | 7 | GPIO 4 | I2C Bus 3 |
+| **Right Encoder**| SCL | 29 | GPIO 5 | I2C Bus 3 |
+| **Right Motor** | RX | 33 | GPIO 13 | Direct to PDN_UART |
+| **Right Motor** | TX | 32 | GPIO 12 | **Via 1kΩ Resistor** to PDN_UART |
+| **TMC2208** | VIO | 17 | 3V3 Power | **MUST BE 3.3V** |
+| **TMC2208** | VM | Ext | N/A | 12V-24V External |
 
-    %% Connections
-    RaspberryPi4 "I2C Bus 1" <..> "AS5600" Motor_Left_System : Feedback Loop A
-    RaspberryPi4 "I2C Bus 3" <..> "AS5600" Motor_Right_System : Feedback Loop B (Isolated)
-    
-    RaspberryPi4 "GPIO 17/27" --> "STEP/DIR" Motor_Left_System : Motion A
-    RaspberryPi4 "GPIO 10/9" --> "STEP/DIR" Motor_Right_System : Motion B
-    
-    RaspberryPi4 "CSI Port" <..> GlobalShutterCam : Image Data
+## 4. Software Config Requirements
+Add to `/boot/config.txt`:
+```bash
+dtoverlay=i2c3,pins_4_5
+dtoverlay=uart5
+enable_uart=1
