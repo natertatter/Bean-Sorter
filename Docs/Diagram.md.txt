@@ -1,0 +1,42 @@
+classDiagram
+    %% Core Controller
+    class RaspberryPi4 {
+        +I2C Bus 1 (GPIO 2/3)
+        +GPIO 5 (STEP)
+        +GPIO 6 (DIR)
+        +CSI Port
+    }
+
+    %% Motion Control
+    class TMC2208_Driver {
+        +VIO (3.3V Logic)
+        +VM (12V Motor Power)
+        +STEP/DIR Interface
+        +StealthChop Technology
+    }
+
+    class StepperMotor {
+        +Coil A
+        +Coil B
+        +Shaft Position
+    }
+
+    %% Feedback Loop
+    class AS5600_Encoder {
+        +I2C Interface (0x36)
+        +Magnetic Sensor
+        +12-bit Resolution
+    }
+
+    %% Vision
+    class GlobalShutterCam {
+        +Sony IMX296
+        +Global Shutter (No rolling artifacts)
+    }
+
+    %% Connections
+    RaspberryPi4 "GPIO 5/6" --> "STEP/DIR" TMC2208_Driver : Motion Commands
+    RaspberryPi4 "I2C Bus 1" <..> "I2C" AS5600_Encoder : Position Read (Feedback)
+    RaspberryPi4 "CSI Port" <..> GlobalShutterCam : High-Speed Frames
+    TMC2208_Driver "Motor Out" --> StepperMotor : Drive Current
+    StepperMotor "Shaft" ..> AS5600_Encoder : Magnetic Field Rotation
