@@ -130,7 +130,8 @@ class AS5600(SensorInterface):
         Returns:
             int: Status register byte value, or None if read failed
         """
-        if not self._is_initialized or self.bus is None:
+        # Check only if bus is open (allow during initialization)
+        if self.bus is None:
             return None
         
         try:
@@ -165,7 +166,8 @@ class AS5600(SensorInterface):
         Returns:
             int: Raw angle value (0-4095), or None if read failed
         """
-        if not self._is_initialized or self.bus is None:
+        # Check only if bus is open (allow during initialization)
+        if self.bus is None:
             return None
         
         try:
@@ -212,10 +214,31 @@ class AS5600(SensorInterface):
             raise RuntimeError("AS5600 not initialized")
         
         try:
-            # Check if magnet is detected before reading angle
-            if not self._is_magnet_detected():
+            # Check magnet status - read STATUS register to get full status
+            status_byte = self._read_status_register()
+            if status_byte is None:
+                logger.warning("Failed to read STATUS register")
+                return None
+            
+            # Parse status bits
+            magnet_detected = bool(status_byte & self.STATUS_MD)
+            magnet_too_weak = bool(status_byte & self.STATUS_ML)
+            magnet_too_strong = bool(status_byte & self.STATUS_MH)
+            
+            # Allow reading if:
+            # - MD is set (ideal - magnet in correct range), OR
+            # - MH is set (magnet too strong but still readable)
+            # Block reading if:
+            # - ML is set (magnet too weak - unreliable)
+            # - No status bits set (magnet not present)
+            if magnet_too_weak:
+                logger.warning("Magnet too weak - readings may be unreliable")
+                return None
+            elif not magnet_detected and not magnet_too_strong:
                 logger.warning("Magnet not detected - cannot read reliable angle")
                 return None
+            elif magnet_too_strong:
+                logger.debug("Magnet too strong - readings may have reduced accuracy")
             
             # Read raw angle value
             raw_angle = self._read_raw_angle()
