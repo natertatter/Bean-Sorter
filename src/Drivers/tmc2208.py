@@ -53,6 +53,7 @@ class TMC2208(MotorInterface):
     REG_GCONF = 0x00       # Global Configuration
     REG_GSTAT = 0x01       # Global Status
     REG_IHOLD_IRUN = 0x10  # Current Control
+    REG_CHOPCONF = 0x6C    # Chopper Configuration (Microstepping)
     REG_XACTUAL = 0x21     # Actual Position
     REG_XTARGET = 0x2D     # Target Position
     REG_VACTUAL = 0x22     # Actual Velocity
@@ -64,8 +65,16 @@ class TMC2208(MotorInterface):
     REG_DMAX = 0x33        # Maximum Deceleration
     REG_RAMPMODE = 0x20    # Ramp Mode
     
+    # CHOPCONF Register Bits
+    CHOPCONF_MRES_MASK = 0x0F000000  # Bits 24-27: Microstep Resolution
+    CHOPCONF_MRES_SHIFT = 24
+    
     # GCONF bits
     GCONF_PDN_DISABLE = 0x00000001  # Bit 0: Disable hardware power-down pin
+    
+    # CHOPCONF Register Bits
+    CHOPCONF_MRES_MASK = 0x0F000000  # Bits 24-27: Microstep Resolution
+    CHOPCONF_MRES_SHIFT = 24
     
     # RAMPMODE values
     RAMPMODE_POSITION = 0
@@ -335,6 +344,61 @@ class TMC2208(MotorInterface):
             logger.error(f"TMC2208 initialization error: {e}", exc_info=True)
             self._cleanup()
             raise TMC2208UARTError(f"Initialization failed: {e}")
+    
+    def set_microstepping(self, microsteps: int) -> bool:
+        """
+        Set microstepping resolution via CHOPCONF register.
+        
+        Args:
+            microsteps: Microstep resolution (1, 2, 4, 8, 16, 32, 64, 128, or 256)
+        
+        Returns:
+            bool: True if microstepping set successfully
+        
+        Note:
+            MRES mapping: 256=0, 128=1, 64=2, 32=3, 16=4, 8=5, 4=6, 2=7, 1=8
+        """
+        if not self._is_initialized:
+            raise TMC2208UARTError("TMC2208 not initialized")
+        
+        # Map microsteps to MRES value
+        mres_map = {
+            256: 0, 128: 1, 64: 2, 32: 3, 16: 4,
+            8: 5, 4: 6, 2: 7, 1: 8
+        }
+        
+        if microsteps not in mres_map:
+            raise ValueError(
+                f"Invalid microstep value: {microsteps}. "
+                f"Valid values: {list(mres_map.keys())}"
+            )
+        
+        mres_value = mres_map[microsteps]
+        
+        try:
+            # Read current CHOPCONF value
+            chopconf = self._read_register(self.REG_CHOPCONF)
+            if chopconf is None:
+                # If read fails, use default value
+                chopconf = 0x00010080  # Default CHOPCONF value
+            
+            # Clear MRES bits (24-27) and set new value
+            chopconf = (chopconf & ~self.CHOPCONF_MRES_MASK) | (mres_value << self.CHOPCONF_MRES_SHIFT)
+            
+            # Write updated CHOPCONF
+            if not self._write_register(self.REG_CHOPCONF, chopconf):
+                logger.error("Failed to set CHOPCONF register")
+                return False
+            
+            # Small delay for register to take effect
+            time.sleep(0.01)
+            
+            logger.info(f"Microstepping set to {microsteps}x (MRES={mres_value})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to set microstepping: {e}")
+            return False
     
     def set_current(self, run_current: int, hold_current: int, hold_delay: int = 4) -> bool:
         """
