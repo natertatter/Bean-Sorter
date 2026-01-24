@@ -151,8 +151,9 @@ class TMC2208(MotorInterface):
         Raises:
             TMC2208UARTError: If UART communication fails
         """
-        if not self._is_initialized or self.uart is None:
-            raise TMC2208UARTError("TMC2208 not initialized")
+        # Check only if UART is open (allow during initialization)
+        if self.uart is None:
+            raise TMC2208UARTError("TMC2208 UART not open")
         
         # Build write datagram
         # Format: SYNC(0x05) + RESERVED(0x00) + ADDR_WRITE(addr|0x80) + DATA(32-bit MSB) + CRC
@@ -215,8 +216,9 @@ class TMC2208(MotorInterface):
         Raises:
             TMC2208UARTError: If UART communication fails
         """
-        if not self._is_initialized or self.uart is None:
-            raise TMC2208UARTError("TMC2208 not initialized")
+        # Check only if UART is open (allow during initialization)
+        if self.uart is None:
+            raise TMC2208UARTError("TMC2208 UART not open")
         
         # Build read request datagram
         addr_byte = address & 0x7F  # No write bit for reads
