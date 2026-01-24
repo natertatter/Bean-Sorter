@@ -21,6 +21,7 @@ Usage:
 import sys
 import time
 import signal
+import os
 from pathlib import Path
 
 # Add parent directory to path for imports
@@ -95,16 +96,106 @@ class TMC2208InteractiveTest:
         except Exception as e:
             print(f"Warning: Error during cleanup: {e}")
     
+    def check_uart_available(self, uart_port: str = '/dev/serial0') -> tuple:
+        """
+        Check if UART port is available.
+        
+        Args:
+            uart_port: UART device path to check
+        
+        Returns:
+            tuple: (is_available: bool, message: str)
+        """
+        # Check if device file exists
+        if not os.path.exists(uart_port):
+            # Check for alternative UART devices
+            alternatives = ['/dev/ttyAMA0', '/dev/ttyS0', '/dev/ttyAMA1']
+            found_alternatives = [alt for alt in alternatives if os.path.exists(alt)]
+            
+            message = (
+                f"UART device '{uart_port}' not found.\n"
+                f"\n"
+            )
+            
+            if found_alternatives:
+                message += (
+                    f"Found alternative UART devices: {found_alternatives}\n"
+                    f"\n"
+                )
+            
+            message += (
+                f"To enable UART on Raspberry Pi:\n"
+                f"1. Run: sudo raspi-config\n"
+                f"2. Navigate to: Interface Options -> Serial Port\n"
+                f"3. Enable serial port (disable login shell if prompted)\n"
+                f"4. Reboot the Raspberry Pi\n"
+                f"\n"
+                f"Alternatively, add these lines to /boot/config.txt:\n"
+                f"   enable_uart=1\n"
+                f"   dtoverlay=uart0  # or uart5 for second UART\n"
+                f"\n"
+                f"Then reboot: sudo reboot\n"
+                f"\n"
+                f"Note: /dev/serial0 is a symlink to the primary UART.\n"
+                f"If it doesn't exist, check /boot/config.txt for UART configuration.\n"
+            )
+            
+            return False, message
+        
+        # Check if user has permissions
+        if not os.access(uart_port, os.R_OK | os.W_OK):
+            return False, (
+                f"No permission to access '{uart_port}'.\n"
+                f"\n"
+                f"To fix this, add your user to the dialout group:\n"
+                f"   sudo usermod -a -G dialout $USER\n"
+                f"   (Then log out and log back in, or reboot)\n"
+                f"\n"
+                f"Or run this script with sudo (not recommended for security):\n"
+                f"   sudo python tests/test_tmc2208_interactive.py\n"
+            )
+        
+        return True, "UART port available"
+    
     def initialize_motor(self):
         """Initialize the TMC2208 motor driver."""
         print("Initializing TMC2208 driver...")
         print("UART Port: /dev/serial0 (GPIO 14/TXD)")
+        
+        # Check UART availability first
+        print("\nChecking UART availability...")
+        uart_available, uart_message = self.check_uart_available('/dev/serial0')
+        
+        if not uart_available:
+            print("ERROR: UART port is not available")
+            print("=" * 60)
+            print(uart_message)
+            print("=" * 60)
+            
+            # Additional diagnostics
+            print("\nDiagnostic Information:")
+            print("  Checking for UART device files:")
+            uart_devices = ['/dev/serial0', '/dev/ttyAMA0', '/dev/ttyS0', '/dev/ttyAMA1']
+            for dev in uart_devices:
+                exists = os.path.exists(dev)
+                readable = os.access(dev, os.R_OK) if exists else False
+                print(f"    {dev}: {'EXISTS' if exists else 'NOT FOUND'} "
+                      f"{'(readable)' if readable else ''}")
+            
+            return False
+        
+        print("✓ UART port is available")
         
         try:
             self.motor = TMC2208(uart_port='/dev/serial0', baudrate=115200)
             
             if not self.motor.initialize():
                 print("ERROR: Failed to initialize TMC2208 driver")
+                print("\nTroubleshooting:")
+                print("  1. Verify TMC2208 is connected to GPIO 14 (TXD)")
+                print("  2. Check wiring: TX via 1kΩ resistor to PDN_UART pin")
+                print("  3. Verify power: VIO to 3.3V, VM to motor power supply")
+                print("  4. Check UART baudrate matches (115200)")
                 return False
             
             print("✓ TMC2208 initialized successfully")
@@ -112,6 +203,10 @@ class TMC2208InteractiveTest:
             
         except Exception as e:
             print(f"ERROR: Initialization failed: {e}")
+            print("\nTroubleshooting:")
+            print("  1. Verify TMC2208 wiring and connections")
+            print("  2. Check that UART is properly enabled in /boot/config.txt")
+            print("  3. Ensure TMC2208 is powered and VIO is at 3.3V")
             return False
     
     def get_microstepping_input(self) -> int:
