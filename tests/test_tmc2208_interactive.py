@@ -199,6 +199,10 @@ class TMC2208InteractiveTest:
                 return False
             
             print("✓ TMC2208 initialized successfully")
+            
+            # Check DRV_STATUS after initialization
+            self.check_drv_status("After initialization")
+            
             return True
             
         except Exception as e:
@@ -208,6 +212,57 @@ class TMC2208InteractiveTest:
             print("  2. Check that UART is properly enabled in /boot/config.txt")
             print("  3. Ensure TMC2208 is powered and VIO is at 3.3V")
             return False
+    
+    def check_drv_status(self, context: str = ""):
+        """
+        Check and display DRV_STATUS register information.
+        
+        Args:
+            context: Context string for the status check (e.g., "After initialization")
+        """
+        if not self.motor:
+            return
+        
+        try:
+            status = self.motor.get_drv_status()
+            if status is None:
+                print(f"\n⚠ Could not read DRV_STATUS register {context}")
+                return
+            
+            print(f"\n{'=' * 60}")
+            print(f"DRV_STATUS Check {context}")
+            print(f"{'=' * 60}")
+            print(f"Raw Value: 0x{status['raw_value']:08X}")
+            print(f"\nStatus Indicators:")
+            print(f"  Standstill: {'Yes' if status['standstill'] else 'No'}")
+            print(f"  StallGuard Active: {'Yes' if status['stallguard'] else 'No'}")
+            if status['stallguard']:
+                print(f"  StallGuard Value: {status['stallguard_value']}")
+            print(f"  Current Scale (CS_ACTUAL): {status['cs_actual']}/31")
+            
+            print(f"\nDiagnostics:")
+            if status['status_ok']:
+                print(f"  ✓ Driver Status: OK")
+            else:
+                print(f"  ✗ Driver Status: ERRORS DETECTED")
+            
+            if status['errors']:
+                print(f"\n  ERRORS:")
+                for error in status['errors']:
+                    print(f"    ✗ {error}")
+            
+            if status['warnings']:
+                print(f"\n  WARNINGS:")
+                for warning in status['warnings']:
+                    print(f"    ⚠ {warning}")
+            
+            if not status['errors'] and not status['warnings']:
+                print(f"  ✓ No errors or warnings detected")
+            
+            print(f"{'=' * 60}")
+            
+        except Exception as e:
+            print(f"\n⚠ Error reading DRV_STATUS: {e}")
     
     def get_microstepping_input(self) -> int:
         """Get microstepping resolution from user."""
@@ -411,6 +466,9 @@ class TMC2208InteractiveTest:
             print(f"Steps per second: {steps_per_sec:.1f}")
             print(f"Estimated duration: {steps * pulse_delay:.2f} seconds")
             
+            # Check DRV_STATUS before move
+            self.check_drv_status("Before move")
+            
             # Generate step pulses
             print("\nGenerating step pulses via GPIO...")
             start_time = time.time()
@@ -418,6 +476,10 @@ class TMC2208InteractiveTest:
             elapsed = time.time() - start_time
             
             print(f"\n✓ Move completed in {elapsed:.2f} seconds")
+            
+            # Check DRV_STATUS after move
+            self.check_drv_status("After move")
+            
             return True
             
         except Exception as e:

@@ -50,13 +50,19 @@ class TMC2208(MotorInterface):
     """
     
     # TMC2208 Register Addresses
-    REG_GCONF = 0x00       # Global Configuration
+    # Note: These are BASE addresses. The _write_register() method automatically
+    # adds 0x80 for write operations (e.g., GCONF 0x00 → 0x80 when writing).
+    # For reads, use the base address directly.
+    # Write Access: Base address + 0x80 (handled automatically by _write_register)
+    # Read Access: Use base address directly
+    REG_GCONF = 0x00       # Global Configuration (base address, becomes 0x80 when writing)
     REG_GSTAT = 0x01       # Global Status
     REG_IHOLD_IRUN = 0x10  # Current Control
     REG_CHOPCONF = 0x6C    # Chopper Configuration (Microstepping)
+    REG_DRV_STATUS = 0x6F  # Driver Status (Diagnostic information)
     REG_XACTUAL = 0x21     # Actual Position
     REG_XTARGET = 0x2D     # Target Position
-    REG_VACTUAL = 0x22     # Actual Velocity
+    REG_VACTUAL = 0x22     # Actual Velocity (0=GPIO control, !=0=internal pulse generator)
     REG_VSTART = 0x23      # Start Velocity
     REG_VSTOP = 0x24       # Stop Velocity
     REG_VMAX = 0x27        # Maximum Velocity
@@ -65,6 +71,25 @@ class TMC2208(MotorInterface):
     REG_DMAX = 0x33        # Maximum Deceleration
     REG_RAMPMODE = 0x20    # Ramp Mode
     
+    # Register Map Dictionary for reference
+    REGISTER_MAP = {
+        'GCONF': 0x00,      # Global Configuration
+        'GSTAT': 0x01,      # Global Status
+        'IHOLD_IRUN': 0x10, # Current Control
+        'CHOPCONF': 0x6C,   # Chopper Configuration
+        'DRV_STATUS': 0x6F, # Driver Status
+        'XACTUAL': 0x21,    # Actual Position
+        'XTARGET': 0x2D,    # Target Position
+        'VACTUAL': 0x22,    # Actual Velocity
+        'VSTART': 0x23,     # Start Velocity
+        'VSTOP': 0x24,      # Stop Velocity
+        'VMAX': 0x27,       # Maximum Velocity
+        'A1': 0x24,        # Acceleration 1
+        'D1': 0x25,        # Deceleration 1
+        'DMAX': 0x33,       # Maximum Deceleration
+        'RAMPMODE': 0x20,   # Ramp Mode
+    }
+    
     # CHOPCONF Register Bits
     CHOPCONF_MRES_MASK = 0x0F000000  # Bits 24-27: Microstep Resolution
     CHOPCONF_MRES_SHIFT = 24
@@ -72,9 +97,19 @@ class TMC2208(MotorInterface):
     # GCONF bits
     GCONF_PDN_DISABLE = 0x00000001  # Bit 0: Disable hardware power-down pin
     
-    # CHOPCONF Register Bits
-    CHOPCONF_MRES_MASK = 0x0F000000  # Bits 24-27: Microstep Resolution
-    CHOPCONF_MRES_SHIFT = 24
+    # DRV_STATUS Register Bits
+    DRV_STATUS_STST = 0x00000001      # Bit 0: Standstill indicator
+    DRV_STATUS_OLB = 0x00000002       # Bit 1: Open load B
+    DRV_STATUS_OLA = 0x00000004       # Bit 2: Open load A
+    DRV_STATUS_S2GB = 0x00000008      # Bit 3: Short to ground B
+    DRV_STATUS_S2GA = 0x00000010      # Bit 4: Short to ground A
+    DRV_STATUS_OTPW = 0x00000020      # Bit 5: Overtemperature pre-warning
+    DRV_STATUS_OT = 0x00000040        # Bit 6: Overtemperature
+    DRV_STATUS_STALLGUARD = 0x00000100  # Bit 8: StallGuard status
+    DRV_STATUS_CS_ACTUAL_MASK = 0x1F0000  # Bits 16-20: Actual current scale
+    DRV_STATUS_CS_ACTUAL_SHIFT = 16
+    DRV_STATUS_STALLGUARD_MASK = 0xFE00  # Bits 9-15: StallGuard value
+    DRV_STATUS_STALLGUARD_SHIFT = 9
     
     # RAMPMODE values
     RAMPMODE_POSITION = 0
@@ -157,6 +192,9 @@ class TMC2208(MotorInterface):
         
         # Build write datagram
         # Format: SYNC(0x05) + RESERVED(0x00) + ADDR_WRITE(addr|0x80) + DATA(32-bit MSB) + CRC
+        # IMPORTANT: Automatically adds 0x80 to address for write operations
+        # Example: REG_GCONF (0x00) becomes 0x80 when writing
+        #          REG_IHOLD_IRUN (0x10) becomes 0x90 when writing
         addr_byte = (address & 0x7F) | self.WRITE_BIT
         data_bytes = bytes([
             self.SYNC_BYTE,
@@ -402,15 +440,177 @@ class TMC2208(MotorInterface):
             logger.error(f"Failed to set microstepping: {e}")
             return False
     
+    def move_using_vactual(self, velocity: int, duration: Optional[float] = None) -> bool:
+        """
+        Move motor using VACTUAL register (velocity mode).
+        
+        When VACTUAL != 0, the motor is controlled by the internal pulse generator
+        instead of GPIO STEP pin. This allows testing without GPIO pulses.
+        
+        Args:
+            velocity: Velocity value (signed 24-bit)
+                     - Positive: Forward direction
+                     - Negative: Reverse direction
+                     - 0: Stop (returns to GPIO STEP control)
+            duration: Optional duration in seconds. If None, motor runs until stopped.
+        
+        Returns:
+            bool: True if velocity set successfully
+        
+        Note:
+            - VACTUAL = 0: Motor controlled by GPIO STEP pin
+            - VACTUAL != 0: Motor controlled by internal pulse generator
+            - Velocity value determines speed and direction
+        """
+        if not self._is_initialized:
+            raise TMC2208UARTError("TMC2208 not initialized")
+        
+        try:
+            # Clamp velocity to signed 24-bit range
+            max_velocity = 0x7FFFFF  # Maximum positive 24-bit value
+            min_velocity = -0x800000  # Minimum negative 24-bit value
+            velocity = max(min_velocity, min(max_velocity, velocity))
+            
+            # Convert signed to unsigned 32-bit (two's complement for negative)
+            if velocity < 0:
+                vactual_value = (1 << 24) + velocity  # Two's complement
+            else:
+                vactual_value = velocity & 0xFFFFFF
+            
+            # Write VACTUAL register
+            if not self._write_register(self.REG_VACTUAL, vactual_value):
+                logger.error("Failed to set VACTUAL register")
+                return False
+            
+            logger.info(f"VACTUAL set to {velocity} (0x{vactual_value:06X})")
+            
+            # If duration specified, wait then stop
+            if duration is not None and duration > 0:
+                time.sleep(duration)
+                self._write_register(self.REG_VACTUAL, 0)  # Stop (return to GPIO control)
+                logger.info("VACTUAL stopped after duration")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to set VACTUAL: {e}")
+            return False
+    
+    def get_drv_status(self) -> Optional[dict]:
+        """
+        Read DRV_STATUS register and return diagnostic information.
+        
+        Returns:
+            dict: Dictionary containing status information with keys:
+                - 'raw_value': Raw register value
+                - 'standstill': bool - Motor is standing still
+                - 'open_load_a': bool - Open load detected on coil A
+                - 'open_load_b': bool - Open load detected on coil B
+                - 'short_to_ground_a': bool - Short to ground on coil A
+                - 'short_to_ground_b': bool - Short to ground on coil B
+                - 'overtemp_warning': bool - Overtemperature pre-warning
+                - 'overtemp': bool - Overtemperature shutdown
+                - 'stallguard': bool - StallGuard active
+                - 'stallguard_value': int - StallGuard value (0-255)
+                - 'cs_actual': int - Actual current scale (0-31)
+                - 'status_ok': bool - Overall status (True if no errors)
+                - 'warnings': list - List of warning messages
+                - 'errors': list - List of error messages
+        """
+        if self.uart is None:
+            return None
+        
+        try:
+            status_raw = self._read_register(self.REG_DRV_STATUS)
+            if status_raw is None:
+                return None
+            
+            # Parse status bits
+            standstill = bool(status_raw & self.DRV_STATUS_STST)
+            open_load_a = bool(status_raw & self.DRV_STATUS_OLA)
+            open_load_b = bool(status_raw & self.DRV_STATUS_OLB)
+            short_ground_a = bool(status_raw & self.DRV_STATUS_S2GA)
+            short_ground_b = bool(status_raw & self.DRV_STATUS_S2GB)
+            overtemp_warning = bool(status_raw & self.DRV_STATUS_OTPW)
+            overtemp = bool(status_raw & self.DRV_STATUS_OT)
+            stallguard = bool(status_raw & self.DRV_STATUS_STALLGUARD)
+            
+            # Extract StallGuard value (bits 9-15)
+            stallguard_value = (status_raw & self.DRV_STATUS_STALLGUARD_MASK) >> self.DRV_STATUS_STALLGUARD_SHIFT
+            
+            # Extract actual current scale (bits 16-20)
+            cs_actual = (status_raw & self.DRV_STATUS_CS_ACTUAL_MASK) >> self.DRV_STATUS_CS_ACTUAL_SHIFT
+            
+            # Build warnings and errors lists
+            warnings = []
+            errors = []
+            
+            if overtemp:
+                errors.append("Overtemperature shutdown - driver disabled")
+            elif overtemp_warning:
+                warnings.append("Overtemperature pre-warning")
+            
+            if short_ground_a:
+                errors.append("Short to ground detected on coil A")
+            if short_ground_b:
+                errors.append("Short to ground detected on coil B")
+            
+            if open_load_a:
+                warnings.append("Open load detected on coil A")
+            if open_load_b:
+                warnings.append("Open load detected on coil B")
+            
+            status_ok = len(errors) == 0
+            
+            return {
+                'raw_value': status_raw,
+                'standstill': standstill,
+                'open_load_a': open_load_a,
+                'open_load_b': open_load_b,
+                'short_to_ground_a': short_ground_a,
+                'short_to_ground_b': short_ground_b,
+                'overtemp_warning': overtemp_warning,
+                'overtemp': overtemp,
+                'stallguard': stallguard,
+                'stallguard_value': stallguard_value,
+                'cs_actual': cs_actual,
+                'status_ok': status_ok,
+                'warnings': warnings,
+                'errors': errors
+            }
+            
+        except Exception as e:
+            logger.error(f"Error reading DRV_STATUS: {e}")
+            return None
+    
+    def get_diagnostic_status(self) -> Optional[dict]:
+        """
+        Get comprehensive diagnostic status from DRV_STATUS register.
+        
+        This is an alias for get_drv_status() for consistency with the API.
+        
+        Returns:
+            dict: Dictionary containing diagnostic status information
+        """
+        return self.get_drv_status()
+    
     def set_current(self, run_current: int, hold_current: int, hold_delay: int = 4) -> bool:
         """
         Set motor current using IHOLD_IRUN register (0x10).
         
+        Current calculation:
+        I_RMS = (CS+1)/32 × V_FS / (R_SENSE + 0.03Ω) × 1/√2
+        Where V_FS = 0.325V (default), CS = 0-31 (5-bit value)
+        
         Args:
-            run_current: Run current value (0-31, typically 0-16 for safe operation)
-            hold_current: Hold current value (0-31, typically 0-16)
-            hold_delay: Hold delay value (0-15, delay before reducing to hold current)
-            
+            run_current: Run current value (0-31, 5-bit)
+                        - 0-31 maps to current scale (CS)
+                        - Typically 0-16 for safe operation
+            hold_current: Hold current value (0-31, 5-bit)
+                         - Typically 0-16, usually less than run_current
+            hold_delay: Hold delay value (0-15, 4-bit)
+                       - Delay before reducing to hold current after standstill
+        
         Returns:
             bool: True if current set successfully
         """
