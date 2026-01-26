@@ -218,8 +218,9 @@ class TMC2208(MotorInterface):
             self.uart.write(data_bytes)
             self.uart.flush()
             
-            # Small delay for processing
-            time.sleep(0.001)
+            # Half-duplex delay: Wait for transmission to complete in single-wire mode.
+            # TX and RX share the same line, so we need time for the line to go idle.
+            time.sleep(0.005)  # 5ms delay for half-duplex line turnaround
             
             logger.debug(f"Wrote register 0x{address:02X} = 0x{value:08X}")
             return True
@@ -278,8 +279,18 @@ class TMC2208(MotorInterface):
             self.uart.write(request_bytes)
             self.uart.flush()
             
+            # Half-duplex delay: Wait for line turnaround in single-wire mode.
+            # TX and RX share the same line, so we need time for the TMC2208 to switch to TX mode.
+            time.sleep(0.005)  # 5ms delay for half-duplex turnaround
+            
             # Wait for response (8 bytes: sync + reserved + addr + 32-bit data + CRC)
             response = self.uart.read(8)
+            
+            # If incomplete, wait a bit more (half-duplex can be slower)
+            if len(response) < 8:
+                time.sleep(0.010)  # Additional 10ms wait
+                additional = self.uart.read(8 - len(response))
+                response += additional
             
             if len(response) < 8:
                 logger.warning(f"Incomplete response for register 0x{address:02X}: {len(response)} bytes")
@@ -357,11 +368,17 @@ class TMC2208(MotorInterface):
             if not self._write_register(self.REG_GCONF, gconf_value):
                 raise TMC2208UARTError("Failed to set GCONF register")
             
-            # Verify GCONF was written correctly
+            # Verify GCONF was written correctly.
+            # In half-duplex mode, reads may fail initially, so we make this non-critical.
             time.sleep(0.01)
-            gconf_read = self._read_register(self.REG_GCONF)
-            if gconf_read is None or (gconf_read & self.GCONF_PDN_DISABLE) == 0:
-                logger.warning("GCONF verification failed - UART mode may not be active")
+            try:
+                gconf_read = self._read_register(self.REG_GCONF)
+                if gconf_read is None or (gconf_read & self.GCONF_PDN_DISABLE) == 0:
+                    logger.warning("GCONF verification failed - UART mode may not be active")
+                    logger.warning("This may be normal in half-duplex mode - continuing anyway")
+            except Exception as e:
+                logger.warning(f"GCONF read verification failed: {e}")
+                logger.warning("This may be normal in half-duplex mode - continuing anyway")
             
             # Set default current (can be adjusted later with set_current())
             # IHOLD_IRUN: bits 0-4 = IHOLD, bits 8-12 = IRUN, bits 16-20 = IHOLDDELAY
