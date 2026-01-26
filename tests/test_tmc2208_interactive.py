@@ -7,7 +7,9 @@ TMC2208 stepper motor driver with UART configuration and GPIO step pulses.
 
 Hardware Requirements:
     - Raspberry Pi 4
-    - TMC2208 driver connected via UART (GPIO 14/TXD)
+    - TMC2208 driver connected via UART (half-duplex single-wire)
+      * GPIO 14 (TXD) via 1kΩ resistor to PDN_UART
+      * GPIO 15 (RXD) direct to PDN_UART
     - STEP pin connected to GPIO 5
     - DIR pin connected to GPIO 6
     - NEMA 17 Stepper Motor (1.8° / 200 steps per revolution)
