@@ -7,12 +7,14 @@ UART register access instead of STEP/DIR GPIO pins.
 
 Hardware Context:
     - TMC2208 Stepper Motor Driver (UART Mode)
-    - Single-wire UART interface on PDN_UART pin
+    - Single-wire half-duplex UART interface on PDN_UART pin
     - Raspberry Pi 4 with 3.3V logic (VIO pin)
     - Left Motor: UART0 (/dev/serial0) on GPIO 14/15
     - Right Motor: UART5 (/dev/ttyAMA1) on GPIO 12/13
+    - Wiring: GPIO 14 (TX) via 1kΩ resistor to PDN_UART, GPIO 15 (RX) direct to PDN_UART
     - Baudrate: 115200
     - Slave Address: 0x00
+    - Protocol: Half-duplex (TX and RX share same line; timing delays required)
 
 UART Protocol:
     - Write: 0x05 (sync) + 0x00 (reserved) + (0x80 | addr) + 32-bit data + CRC8
@@ -123,7 +125,12 @@ class TMC2208(MotorInterface):
     SLAVE_ADDRESS = 0x00
     WRITE_BIT = 0x80
     UART_TIMEOUT = 1.0  # seconds
-    
+
+    # Half-duplex timing (single-wire: TX/RX share line; delays for line turnaround)
+    HALF_DUPLEX_WRITE_DELAY = 0.005   # 5ms after write
+    HALF_DUPLEX_READ_DELAY = 0.005    # 5ms after read request before reading response
+    HALF_DUPLEX_RETRY_DELAY = 0.010   # 10ms extra wait if response incomplete
+
     def __init__(self, uart_port: str = '/dev/serial0', baudrate: int = 115200):
         """
         Initialize TMC2208 driver with UART communication.
@@ -220,7 +227,7 @@ class TMC2208(MotorInterface):
             
             # Half-duplex delay: Wait for transmission to complete in single-wire mode.
             # TX and RX share the same line, so we need time for the line to go idle.
-            time.sleep(0.005)  # 5ms delay for half-duplex line turnaround
+            time.sleep(self.HALF_DUPLEX_WRITE_DELAY)
             
             logger.debug(f"Wrote register 0x{address:02X} = 0x{value:08X}")
             return True
@@ -281,14 +288,14 @@ class TMC2208(MotorInterface):
             
             # Half-duplex delay: Wait for line turnaround in single-wire mode.
             # TX and RX share the same line, so we need time for the TMC2208 to switch to TX mode.
-            time.sleep(0.005)  # 5ms delay for half-duplex turnaround
+            time.sleep(self.HALF_DUPLEX_READ_DELAY)
             
             # Wait for response (8 bytes: sync + reserved + addr + 32-bit data + CRC)
             response = self.uart.read(8)
             
             # If incomplete, wait a bit more (half-duplex can be slower)
             if len(response) < 8:
-                time.sleep(0.010)  # Additional 10ms wait
+                time.sleep(self.HALF_DUPLEX_RETRY_DELAY)
                 additional = self.uart.read(8 - len(response))
                 response += additional
             

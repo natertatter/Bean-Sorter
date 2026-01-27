@@ -496,9 +496,9 @@ class TMC2208InteractiveTest:
         print("TMC2208 Interactive Test Program")
         print("=" * 60)
         print("Hardware Configuration:")
-        print("  - UART: /dev/serial0 (GPIO 14/TXD)")
-        print("  - STEP: GPIO 5")
-        print("  - DIR: GPIO 6")
+        print("  - UART: /dev/serial0 (half-duplex single-wire)")
+        print("  - GPIO 14 (TX) via 1kΩ → PDN_UART | GPIO 15 (RX) direct → PDN_UART")
+        print("  - STEP: GPIO 5 | DIR: GPIO 6")
         print("  - Motor: NEMA 17 (200 steps/rev)")
         print("=" * 60)
         
