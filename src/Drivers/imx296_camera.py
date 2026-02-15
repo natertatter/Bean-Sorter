@@ -21,6 +21,11 @@ from typing import Optional, Tuple
 import numpy as np
 
 try:
+    from ..config import VisionConfig, DEFAULT_VISION_CONFIG
+except ImportError:
+    from src.config import VisionConfig, DEFAULT_VISION_CONFIG
+
+try:
     from picamera2 import Picamera2
     PICAMERA2_AVAILABLE = True
 except ImportError:
@@ -146,28 +151,24 @@ class IMX296Camera:
     shutter duration to avoid AGC interference during high-speed motion.
     """
     
-    # Default camera settings
-    DEFAULT_RESOLUTION = (1440, 1080)  # Common IMX296 resolution
-    DEFAULT_FRAMERATE = 60  # FPS
-    DEFAULT_SHUTTER_US = 10000  # 10ms fixed shutter (prevents AGC interference)
-    
     def __init__(
         self,
-        resolution: Tuple[int, int] = DEFAULT_RESOLUTION,
-        framerate: int = DEFAULT_FRAMERATE,
-        shutter_duration_us: int = DEFAULT_SHUTTER_US,
-        queue_size: int = 10
+        vision_config: Optional[VisionConfig] = None,
+        resolution: Optional[Tuple[int, int]] = None,
+        framerate: Optional[int] = None,
+        shutter_duration_us: Optional[int] = None,
+        queue_size: int = 10,
     ):
         """
         Initialize IMX296 camera driver.
-        
+
         Args:
-            resolution: Camera resolution (width, height)
-            framerate: Desired framerate in FPS
-            shutter_duration_us: Fixed shutter duration in microseconds
-                                 (prevents AGC interference during motion)
-            queue_size: Maximum number of images to buffer in queue
-        
+            vision_config: Vision settings (resolution, shutter). Defaults to DEFAULT_VISION_CONFIG.
+            resolution: Override resolution (width, height). Takes precedence over vision_config.
+            framerate: Override framerate in FPS.
+            shutter_duration_us: Override fixed shutter in µs. Prevents AGC interference during motion.
+            queue_size: Maximum number of images to buffer in queue.
+
         Raises:
             IMX296CameraError: If Picamera2 is not available
         """
@@ -176,10 +177,14 @@ class IMX296Camera:
                 "Picamera2 library not available. "
                 "Install with: sudo apt install -y python3-picamera2"
             )
-        
-        self.resolution = resolution
-        self.framerate = framerate
-        self.shutter_duration_us = shutter_duration_us
+
+        vc = vision_config if vision_config is not None else DEFAULT_VISION_CONFIG
+        self.vision_config = vc
+        self.resolution = resolution if resolution is not None else vc.resolution
+        self.framerate = framerate if framerate is not None else vc.framerate
+        self.shutter_duration_us = (
+            shutter_duration_us if shutter_duration_us is not None else vc.shutter_speed_us
+        )
         self.queue_size = queue_size
         
         self.camera: Optional[Picamera2] = None
@@ -492,23 +497,28 @@ class IMX296Camera:
 class MockIMX296Camera(IMX296Camera):
     """
     Mock IMX296 camera driver for testing without hardware.
-    
+
     Simulates camera capture for testing on development machines
     without actual camera hardware or CSI connection.
     """
-    
+
     def __init__(
         self,
-        resolution: Tuple[int, int] = (1440, 1080),
-        framerate: int = 60,
-        shutter_duration_us: int = 10000,
-        queue_size: int = 10
+        vision_config: Optional[VisionConfig] = None,
+        resolution: Optional[Tuple[int, int]] = None,
+        framerate: Optional[int] = None,
+        shutter_duration_us: Optional[int] = None,
+        queue_size: int = 10,
     ):
         """Initialize mock camera (doesn't require Picamera2)."""
         # Don't call super().__init__() - we'll initialize differently
-        self.resolution = resolution
-        self.framerate = framerate
-        self.shutter_duration_us = shutter_duration_us
+        vc = vision_config if vision_config is not None else DEFAULT_VISION_CONFIG
+        self.vision_config = vc
+        self.resolution = resolution if resolution is not None else vc.resolution
+        self.framerate = framerate if framerate is not None else vc.framerate
+        self.shutter_duration_us = (
+            shutter_duration_us if shutter_duration_us is not None else vc.shutter_speed_us
+        )
         self.queue_size = queue_size
         
         self.camera = None

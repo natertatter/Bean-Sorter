@@ -14,6 +14,7 @@ Sorter_MVP/
 │
 ├── 📂 src/                          # SOURCE CODE
 │   ├── __init__.py
+│   ├── config.py                    # Pins, MotorConfig, SensorConfig, VisionConfig (dataclasses)
 │   │
 │   ├── 📂 interfaces/               # TEMPLATES
 │   │   ├── __init__.py

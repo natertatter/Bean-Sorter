@@ -19,6 +19,13 @@ import time
 from typing import Dict, Any, Optional
 
 try:
+    from gpiozero import DigitalOutputDevice
+    _GPIOZERO_AVAILABLE = True
+except ImportError:
+    _GPIOZERO_AVAILABLE = False
+    DigitalOutputDevice = None
+
+try:
     from smbus2 import SMBus, i2c_msg
 except ImportError:
     # Fallback for systems without smbus2
@@ -31,9 +38,11 @@ except ImportError:
 
 try:
     from ..interfaces.sensor_interface import SensorInterface, SensorStatus
+    from ..config import Pins, SensorConfig, DEFAULT_PINS, DEFAULT_SENSOR_CONFIG
 except ImportError:
     # Fallback for standalone testing
     from src.interfaces.sensor_interface import SensorInterface, SensorStatus
+    from src.config import Pins, SensorConfig, DEFAULT_PINS, DEFAULT_SENSOR_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +61,6 @@ class AS5600(SensorInterface):
     proper cleanup and safe-state handling.
     """
     
-    # AS5600 I2C Address
-    I2C_ADDRESS = 0x36
-    
     # AS5600 Register Addresses
     REG_STATUS = 0x0B        # Status register
     REG_RAW_ANGLE_H = 0x0C   # Raw angle high byte (bits 11-8)
@@ -70,19 +76,31 @@ class AS5600(SensorInterface):
     MAX_RAW_VALUE = 0x0FFF   # Maximum raw angle value (4095)
     DEGREES_PER_REVOLUTION = 360.0
     
-    def __init__(self, i2c_bus: int = 1):
+    def __init__(
+        self,
+        i2c_bus: Optional[int] = None,
+        sensor_config: Optional[SensorConfig] = None,
+        pins: Optional[Pins] = None,
+    ):
         """
         Initialize AS5600 driver with I2C communication.
-        
+
         Args:
-            i2c_bus: I2C bus number (1 for default bus, 3 for right encoder bus)
+            i2c_bus: I2C bus number. Overrides sensor_config if provided.
+            sensor_config: I2C address and bus. Defaults to DEFAULT_SENSOR_CONFIG.
+            pins: Pin definitions. AS5600_DIR used for optional direction control.
         """
         super().__init__()
-        self.i2c_bus_number = i2c_bus
+        sc = sensor_config if sensor_config is not None else DEFAULT_SENSOR_CONFIG
+        self.sensor_config = sc
+        self.pins = pins if pins is not None else DEFAULT_PINS
+        self.i2c_bus_number = i2c_bus if i2c_bus is not None else sc.i2c_bus
+        self.i2c_address = sc.i2c_addr
         self.bus: Optional[SMBus] = None
+        self._dir_pin: Optional[Any] = None
         self._last_angle: Optional[float] = None
         self._last_status_byte: Optional[int] = None
-        
+
         if SMBus is None:
             raise ImportError(
                 "smbus2 library not available. Install with: pip install smbus2"
@@ -104,10 +122,18 @@ class AS5600(SensorInterface):
         try:
             # Open I2C bus
             self.bus = SMBus(self.i2c_bus_number)
-            
+
             # Small delay for I2C bus to stabilize
             time.sleep(0.01)
-            
+
+            # Optional: Initialize AS5600_DIR pin for direction control
+            if self.pins.AS5600_DIR is not None and _GPIOZERO_AVAILABLE and DigitalOutputDevice is not None:
+                try:
+                    self._dir_pin = DigitalOutputDevice(self.pins.AS5600_DIR, initial_value=False)
+                    logger.debug(f"AS5600_DIR pin initialized: GPIO {self.pins.AS5600_DIR}")
+                except Exception as e:
+                    logger.warning(f"Could not initialize AS5600_DIR pin: {e}")
+
             # Verify communication by reading STATUS register
             status_byte = self._read_status_register()
             if status_byte is None:
@@ -135,7 +161,7 @@ class AS5600(SensorInterface):
             return None
         
         try:
-            status = self.bus.read_byte_data(self.I2C_ADDRESS, self.REG_STATUS)
+            status = self.bus.read_byte_data(self.i2c_address, self.REG_STATUS)
             return status
         except Exception as e:
             logger.debug(f"I2C read error for STATUS register: {e}")
@@ -173,7 +199,7 @@ class AS5600(SensorInterface):
         try:
             # Read both bytes in a single block read for atomicity
             # Start at register 0x0C, read 2 bytes
-            data = self.bus.read_i2c_block_data(self.I2C_ADDRESS, self.REG_RAW_ANGLE_H, 2)
+            data = self.bus.read_i2c_block_data(self.i2c_address, self.REG_RAW_ANGLE_H, 2)
             
             if len(data) < 2:
                 logger.warning("Incomplete read from RAW ANGLE registers")
@@ -374,15 +400,23 @@ class AS5600(SensorInterface):
     def _cleanup(self) -> None:
         """
         Internal cleanup method for I2C and hardware resources.
-        
-        Closes I2C bus connection and resets state.
+
+        Closes I2C bus connection, releases GPIO pins, and resets state.
         Idempotent - safe to call multiple times.
         """
         try:
             if self.bus is not None:
                 self.bus.close()
                 self.bus = None
-            
+
+            if self._dir_pin is not None:
+                try:
+                    if hasattr(self._dir_pin, "close"):
+                        self._dir_pin.close()
+                except Exception as e:
+                    logger.debug(f"Error closing AS5600_DIR pin: {e}")
+                self._dir_pin = None
+
             self._is_initialized = False
             self._last_angle = None
             self._last_status_byte = None
@@ -412,18 +446,31 @@ class MockAS5600(AS5600):
     without actual AS5600 hardware or I2C connections.
     """
     
-    def __init__(self, i2c_bus: int = 1, simulate_magnet: bool = True):
+    def __init__(
+        self,
+        i2c_bus: Optional[int] = None,
+        sensor_config: Optional[SensorConfig] = None,
+        pins: Optional[Pins] = None,
+        simulate_magnet: bool = True,
+    ):
         """
         Initialize mock AS5600 driver.
-        
+
         Args:
-            i2c_bus: I2C bus number (for compatibility)
+            i2c_bus: I2C bus number. Overrides sensor_config if provided.
+            sensor_config: I2C address and bus. Defaults to DEFAULT_SENSOR_CONFIG.
+            pins: Pin definitions (for compatibility).
             simulate_magnet: If True, simulates magnet being detected
         """
         # Don't call super().__init__() - we'll initialize differently
         SensorInterface.__init__(self)
-        self.i2c_bus_number = i2c_bus
+        sc = sensor_config if sensor_config is not None else DEFAULT_SENSOR_CONFIG
+        self.sensor_config = sc
+        self.pins = pins if pins is not None else DEFAULT_PINS
+        self.i2c_bus_number = i2c_bus if i2c_bus is not None else sc.i2c_bus
+        self.i2c_address = sc.i2c_addr
         self.bus = None
+        self._dir_pin = None
         self._simulate_magnet = simulate_magnet
         self._mock_angle = 0.0
         self._last_angle = None

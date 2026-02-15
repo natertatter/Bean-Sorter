@@ -25,14 +25,24 @@ UART Protocol:
 import serial
 import time
 import logging
-from typing import Optional
+from typing import Optional, Any
 from abc import ABC
+
+# Optional GPIO for STEP/DIR mode (may not be available on dev machines)
+try:
+    from gpiozero import DigitalOutputDevice
+    _GPIOZERO_AVAILABLE = True
+except ImportError:
+    _GPIOZERO_AVAILABLE = False
+    DigitalOutputDevice = None
 
 try:
     from ..interfaces.motor_interface import MotorInterface
+    from ..config import Pins, MotorConfig, DEFAULT_PINS, DEFAULT_MOTOR_CONFIG, UART_BAUDRATE
 except ImportError:
     # Fallback for standalone testing
     from src.interfaces.motor_interface import MotorInterface
+    from src.config import Pins, MotorConfig, DEFAULT_PINS, DEFAULT_MOTOR_CONFIG, UART_BAUDRATE
 
 logger = logging.getLogger(__name__)
 
@@ -131,18 +141,32 @@ class TMC2208(MotorInterface):
     HALF_DUPLEX_READ_DELAY = 0.005    # 5ms after read request before reading response
     HALF_DUPLEX_RETRY_DELAY = 0.010   # 10ms extra wait if response incomplete
 
-    def __init__(self, uart_port: str = '/dev/serial0', baudrate: int = 115200):
+    def __init__(
+        self,
+        uart_port: str = '/dev/serial0',
+        baudrate: Optional[int] = None,
+        pins: Optional[Pins] = None,
+        motor_config: Optional[MotorConfig] = None,
+    ):
         """
         Initialize TMC2208 driver with UART communication.
-        
+
         Args:
-            uart_port: UART device path (e.g., '/dev/serial0' or '/dev/ttyAMA1')
-            baudrate: UART baudrate (default: 115200)
+            uart_port: UART device path (e.g., '/dev/serial0' or '/dev/ttyAMA1').
+                       /dev/serial0 uses Pins.TX/RX (GPIO 14/15).
+            baudrate: UART baudrate. Defaults to config UART_BAUDRATE.
+            pins: Pin definitions (STEP, DIR, TX, RX). Used for GPIO mode if needed.
+            motor_config: Motor settings (IRUN, IHOLD, microsteps). Used during init.
         """
         super().__init__()
         self.uart_port = uart_port
-        self.baudrate = baudrate
+        self.baudrate = baudrate if baudrate is not None else UART_BAUDRATE
+        self.pins = pins if pins is not None else DEFAULT_PINS
+        self.motor_config = motor_config if motor_config is not None else DEFAULT_MOTOR_CONFIG
         self.uart: Optional[serial.Serial] = None
+        self._step_pin: Any = None
+        self._dir_pin: Any = None
+        self._enn_pin: Any = None
         self._current_position = 0
         self._is_moving = False
         
@@ -387,15 +411,26 @@ class TMC2208(MotorInterface):
                 logger.warning(f"GCONF read verification failed: {e}")
                 logger.warning("This may be normal in half-duplex mode - continuing anyway")
             
-            # Set default current (can be adjusted later with set_current())
+            # Set current from MotorConfig (IRUN, IHOLD, IHOLDDELAY)
             # IHOLD_IRUN: bits 0-4 = IHOLD, bits 8-12 = IRUN, bits 16-20 = IHOLDDELAY
-            # Default: IRUN=16 (50% of max), IHOLD=8 (25% of max), IHOLDDELAY=4
-            default_current = (4 << 16) | (16 << 8) | 8
+            mc = self.motor_config
+            default_current = (mc.ihold_delay << 16) | (mc.irun << 8) | mc.ihold
             self._write_register(self.REG_IHOLD_IRUN, default_current)
-            
+
+            # Optional: Setup STEP/DIR GPIO pins for external pulse mode
+            if _GPIOZERO_AVAILABLE and DigitalOutputDevice is not None:
+                try:
+                    self._step_pin = DigitalOutputDevice(self.pins.STEP, initial_value=False)
+                    self._dir_pin = DigitalOutputDevice(self.pins.DIR, initial_value=False)
+                    if self.pins.ENN is not None:
+                        self._enn_pin = DigitalOutputDevice(self.pins.ENN, initial_value=False)
+                    logger.debug(f"STEP/DIR pins initialized: STEP={self.pins.STEP}, DIR={self.pins.DIR}")
+                except Exception as e:
+                    logger.warning(f"Could not initialize STEP/DIR GPIO: {e}")
+
             # Set motor to hold position initially
             self.stop()
-            
+
             self._is_initialized = True
             logger.info(f"TMC2208 initialized on {self.uart_port}")
             return True
@@ -768,23 +803,34 @@ class TMC2208(MotorInterface):
     def _cleanup(self) -> None:
         """
         Internal cleanup method for UART and hardware resources.
-        
-        Closes UART connection and ensures motor is in safe state.
+
+        Closes UART connection, releases GPIO pins, and ensures motor is in safe state.
         Idempotent - safe to call multiple times.
         """
         try:
             if self.uart is not None:
                 # Ensure motor is stopped before closing
                 self._set_safe_state()
-                
+
                 # Close UART connection
                 self.uart.close()
                 self.uart = None
-            
+
+            # Release STEP/DIR/ENN GPIO pins
+            for pin_attr in ("_step_pin", "_dir_pin", "_enn_pin"):
+                pin = getattr(self, pin_attr, None)
+                if pin is not None:
+                    try:
+                        if hasattr(pin, "close"):
+                            pin.close()
+                        setattr(self, pin_attr, None)
+                    except Exception as e:
+                        logger.debug(f"Error closing {pin_attr}: {e}")
+
             self._is_initialized = False
             self._is_moving = False
             logger.debug("TMC2208 cleanup completed")
-            
+
         except Exception as e:
             logger.error(f"Error during cleanup: {e}", exc_info=True)
     
@@ -824,12 +870,20 @@ class MockTMC2208(TMC2208):
     without actual TMC2208 hardware or UART connections.
     """
     
-    def __init__(self, uart_port: str = '/dev/serial0', baudrate: int = 115200):
+    def __init__(
+        self,
+        uart_port: str = '/dev/serial0',
+        baudrate: Optional[int] = None,
+        pins: Optional[Pins] = None,
+        motor_config: Optional[MotorConfig] = None,
+    ):
         """Initialize mock TMC2208 driver."""
         # Don't call super().__init__() - we'll initialize differently
         MotorInterface.__init__(self)
         self.uart_port = uart_port
-        self.baudrate = baudrate
+        self.baudrate = baudrate if baudrate is not None else UART_BAUDRATE
+        self.pins = pins if pins is not None else DEFAULT_PINS
+        self.motor_config = motor_config if motor_config is not None else DEFAULT_MOTOR_CONFIG
         self._registers = {}
         self._current_position = 0
         self._is_moving = False
@@ -841,13 +895,15 @@ class MockTMC2208(TMC2208):
     def initialize(self) -> bool:
         """Initialize mock TMC2208 - simulates successful initialization."""
         try:
+            mc = self.motor_config
+            default_current = (mc.ihold_delay << 16) | (mc.irun << 8) | mc.ihold
             # Simulate register initialization
             self._registers[self.REG_GCONF] = self.GCONF_PDN_DISABLE
             self._registers[self.REG_XACTUAL] = 0
             self._registers[self.REG_XTARGET] = 0
             self._registers[self.REG_RAMPMODE] = self.RAMPMODE_HOLD
-            self._registers[self.REG_IHOLD_IRUN] = (4 << 16) | (16 << 8) | 8
-            
+            self._registers[self.REG_IHOLD_IRUN] = default_current
+
             self._is_initialized = True
             logger.info(f"MockTMC2208 initialized (simulated {self.uart_port})")
             return True
