@@ -1,0 +1,41 @@
+my_robot_project/
+│
+├── 📂 models/                       # [UPDATED] TFLite Model Artifacts
+│   ├── coffee_bean_mobilenet_dynamic.tflite  # The compiled model
+│   └── labels.json                  # Class names (JSON format)
+│
+├── 📂 docs/                         # DOCUMENTATION
+│   ├── system_context.md            # Hardware Specs
+│   ├── diagrams.md                  # Mermaid diagrams
+│   └── architecture.md              # Project notes
+│
+├── 📂 src/                          # SOURCE CODE
+│   ├── __init__.py
+│   ├── config.py                    # Update config to point to the .tflite file
+│   │
+│   ├── 📂 interfaces/               # TEMPLATES
+│   │   ├── __init__.py
+│   │   ├── motor_interface.py
+│   │   └── sensor_interface.py
+│   │
+│   ├── 📂 drivers/                  # HARDWARE DRIVERS
+│   │   ├── __init__.py
+│   │   ├── tmc2208.py
+│   │   ├── as5600.py
+│   │   └── imx296_camera.py
+│   │
+│   ├── 📂 ml/                       # [UPDATED] ML INFERENCE LOGIC
+│   │   ├── __init__.py
+│   │   ├── tflite_detector.py       # Logic to load the TFLite interpreter
+│   │   └── preprocessor.py          # Resizing images to 224x224 (MobileNet standard)
+│   │
+│   └── 📂 controllers/              # BRAINS
+│       ├── __init__.py
+│       └── motion_controller.py
+│
+├── 📂 tests/                        # TESTS
+│   └── test_motors.py
+│
+├── .gitignore                       # Add "*.tflite" to ignore large model files
+├── requirements.txt                 # Add "tensorflow-aarch64" or "tflite-runtime"
+└── main.py                          # THE STARTER

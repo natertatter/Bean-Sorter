@@ -1,0 +1,40 @@
+Sorter_MVP/
+│
+├── 📂 models/                       # TFLite Model Artifacts
+│   ├── coffee_bean_mobilenet_dynamic.tflite  # The compiled model
+│   ├── labels.json                  # Class names (JSON format)
+│   └── coffee_bean_classifier_rpi.py        # RPi classifier script
+│
+├── 📂 Docs/                         # DOCUMENTATION
+│   ├── system_context.md            # Hardware Specs
+│   ├── Folder Structure Map.txt     # Template/planned structure
+│   ├── Folder Structure Map - Current.txt   # This file — actual structure
+│   ├── Process_Diagram.md           # Mermaid process flow diagrams
+│   └── Diagram.md.txt               # Original hardware class diagram
+│
+├── 📂 src/                          # SOURCE CODE
+│   ├── __init__.py
+│   │
+│   ├── 📂 interfaces/               # TEMPLATES
+│   │   ├── __init__.py
+│   │   ├── motor_interface.py
+│   │   └── sensor_interface.py
+│   │
+│   ├── 📂 Drivers/                  # HARDWARE DRIVERS
+│   │   ├── __init__.py
+│   │   ├── tmc2208.py
+│   │   ├── as5600.py
+│   │   └── imx296_camera.py
+│   │
+│   └── 📂 Controllers/              # BRAINS
+│       ├── __init__.py
+│       └── motion_controller.py
+│
+├── 📂 tests/                        # TESTS
+│   ├── test_as5600_live.py          # AS5600 encoder tests
+│   └── test_tmc2208_interactive.py  # TMC2208 motor driver tests
+│
+├── LICENSE
+├── README.md
+├── requirements.txt
+└── main.py                          # Entry point

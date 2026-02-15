@@ -1,0 +1,22 @@
+{
+  "classes": [
+    "Broken",
+    "Full Black",
+    "Good",
+    "Insert Damage",
+    "Mold",
+    "Parchment",
+    "Test",
+    "Withered"
+  ],
+  "class_indices": {
+    "Broken": 0,
+    "Full Black": 1,
+    "Good": 2,
+    "Insert Damage": 3,
+    "Mold": 4,
+    "Parchment": 5,
+    "Test": 6,
+    "Withered": 7
+  }
+}
