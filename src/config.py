@@ -4,7 +4,7 @@ Central configuration for Sorter MVP.
 All pin definitions, communication parameters, and mechanical constants
 are centralized here. Use dataclasses for type safety.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -74,6 +74,17 @@ class VisionConfig:
     framerate: int = 60
 
 
+@dataclass(frozen=True)
+class InspectionConfig:
+    """
+    Position-triggered inspection configuration.
+    Used for capture-on-angle-delta and TFLite analysis.
+    """
+    trigger_interval_deg: float = 15.0   # Angle delta to trigger a photo
+    calibration_delay: float = 1.0       # Time to wait during zeroing (seconds)
+    model_path: str = ""                 # Path to TFLite model
+
+
 # --- UART (Motor Control) - legacy / convenience ---
 UART_BAUDRATE = 115200
 UART_LEFT_DEVICE = "/dev/serial0"   # UART0, GPIO 14/15
@@ -84,3 +95,4 @@ DEFAULT_PINS = Pins()
 DEFAULT_MOTOR_CONFIG = MotorConfig()
 DEFAULT_SENSOR_CONFIG = SensorConfig()
 DEFAULT_VISION_CONFIG = VisionConfig()
+DEFAULT_INSPECTION_CONFIG = InspectionConfig(model_path=str(MODEL_PATH))

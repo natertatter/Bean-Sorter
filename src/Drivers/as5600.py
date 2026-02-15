@@ -100,6 +100,7 @@ class AS5600(SensorInterface):
         self._dir_pin: Optional[Any] = None
         self._last_angle: Optional[float] = None
         self._last_status_byte: Optional[int] = None
+        self._zero_offset: float = 0.0  # Degrees; set by zero_position()
 
         if SMBus is None:
             raise ImportError(
@@ -143,12 +144,35 @@ class AS5600(SensorInterface):
             self._is_initialized = True
             logger.info(f"AS5600 initialized on I2C bus {self.i2c_bus_number}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize AS5600 on bus {self.i2c_bus_number}: {e}")
             self._cleanup()
             raise AS5600I2CError(f"I2C initialization failed: {e}")
-    
+
+    def zero_position(self) -> bool:
+        """
+        Calibrate zero position: read current raw angle and store as offset.
+
+        Subsequent get_angle() calls return angle relative to this zero point
+        (0-360 wrap-around handled). Safer than burning OTP in hardware.
+
+        Returns:
+            bool: True if zero was set successfully
+        """
+        if not self._is_initialized:
+            raise RuntimeError("AS5600 not initialized")
+
+        raw_angle = self._read_raw_angle()
+        if raw_angle is None:
+            logger.warning("Failed to read raw angle for zero_position")
+            return False
+
+        # Convert raw (0-4095) to degrees (0-360)
+        self._zero_offset = (raw_angle / 4096.0) * self.DEGREES_PER_REVOLUTION
+        logger.info(f"AS5600 zero position set to {self._zero_offset:.2f}° (raw={raw_angle})")
+        return True
+
     def _read_status_register(self) -> Optional[int]:
         """
         Read the STATUS register (0x0B) to check sensor state.
@@ -271,15 +295,13 @@ class AS5600(SensorInterface):
             if raw_angle is None:
                 logger.warning("Failed to read RAW ANGLE from AS5600")
                 return None
-            
+
             # Convert 12-bit raw value (0-4095) to degrees (0-360)
-            # Formula: degrees = (raw_angle / 4096) * 360
-            angle_degrees = (raw_angle / 4096.0) * self.DEGREES_PER_REVOLUTION
-            
-            # Ensure angle is in valid range [0, 360)
-            if angle_degrees >= 360.0:
-                angle_degrees = 0.0
-            
+            raw_degrees = (raw_angle / 4096.0) * self.DEGREES_PER_REVOLUTION
+
+            # Return angle relative to zero point (handles 0-360 wrap-around)
+            angle_degrees = (raw_degrees - self._zero_offset + 360.0) % 360.0
+
             self._last_angle = angle_degrees
             logger.debug(f"AS5600 angle: {angle_degrees:.2f}° (raw: {raw_angle})")
             return angle_degrees
@@ -420,6 +442,7 @@ class AS5600(SensorInterface):
             self._is_initialized = False
             self._last_angle = None
             self._last_status_byte = None
+            self._zero_offset = 0.0
             logger.debug("AS5600 cleanup completed")
             
         except Exception as e:
@@ -475,7 +498,8 @@ class MockAS5600(AS5600):
         self._mock_angle = 0.0
         self._last_angle = None
         self._last_status_byte = None
-    
+        self._zero_offset = 0.0
+
     def __repr__(self):
         return f"MockAS5600(i2c_bus={self.i2c_bus_number}, initialized={self._is_initialized})"
     
@@ -513,27 +537,26 @@ class MockAS5600(AS5600):
         return raw_angle
     
     def get_angle(self) -> Optional[float]:
-        """Simulate getting angle."""
+        """Simulate getting angle (relative to zero position)."""
         if not self._is_initialized:
             raise RuntimeError("MockAS5600 not initialized")
-        
+
         try:
             if not self._is_magnet_detected():
                 logger.warning("[MOCK] Magnet not detected")
                 return None
-            
+
             raw_angle = self._read_raw_angle()
             if raw_angle is None:
                 return None
-            
-            angle_degrees = (raw_angle / 4096.0) * self.DEGREES_PER_REVOLUTION
-            if angle_degrees >= 360.0:
-                angle_degrees = 0.0
-            
+
+            raw_degrees = (raw_angle / 4096.0) * self.DEGREES_PER_REVOLUTION
+            angle_degrees = (raw_degrees - self._zero_offset + 360.0) % 360.0
+
             self._last_angle = angle_degrees
             logger.debug(f"[MOCK] AS5600 angle: {angle_degrees:.2f}°")
             return angle_degrees
-            
+
         except Exception as e:
             logger.error(f"[MOCK] Error reading angle: {e}")
             return None

@@ -10,12 +10,13 @@ Drivers:
     - MockTMC2208: Mock implementation for testing without hardware
     - AS5600: Magnetic encoder with I2C control
     - MockAS5600: Mock implementation for testing without hardware
-    - IMX296Camera: Global shutter camera with threaded capture
+    - IMX296Camera: Global shutter camera with position-triggered capture
     - MockIMX296Camera: Mock implementation for testing without hardware
 """
 
 from .tmc2208 import TMC2208, MockTMC2208, TMC2208UARTError
 from .as5600 import AS5600, MockAS5600, AS5600I2CError
+from .vision_inference import TFLiteInference, TFLiteInferenceError
 
 # Camera driver import is optional (requires Picamera2)
 try:
@@ -23,12 +24,14 @@ try:
     __all__ = [
         'TMC2208', 'MockTMC2208', 'TMC2208UARTError',
         'AS5600', 'MockAS5600', 'AS5600I2CError',
+        'TFLiteInference', 'TFLiteInferenceError',
         'IMX296Camera', 'MockIMX296Camera', 'IMX296CameraError'
     ]
 except ImportError:
     # Picamera2 not available - exclude camera drivers
     __all__ = [
         'TMC2208', 'MockTMC2208', 'TMC2208UARTError',
-        'AS5600', 'MockAS5600', 'AS5600I2CError'
+        'AS5600', 'MockAS5600', 'AS5600I2CError',
+        'TFLiteInference', 'TFLiteInferenceError'
     ]
 

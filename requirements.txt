@@ -1,0 +1,12 @@
+# TFLite inference (Raspberry Pi: tflite-runtime for smaller footprint)
+tflite-runtime>=2.14.0
+# Fallback: tensorflow (includes TFLite) for non-Pi development
+# tensorflow>=2.14.0
+
+# Vision preprocessing
+opencv-python-headless>=4.8.0
+
+# Hardware (Raspberry Pi)
+smbus2>=0.4.0
+pyserial>=3.5
+# gpiozero>=1.6.0  # Optional, for STEP/DIR GPIO

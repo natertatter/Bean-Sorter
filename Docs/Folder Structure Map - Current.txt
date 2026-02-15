@@ -7,14 +7,12 @@ Sorter_MVP/
 │
 ├── 📂 Docs/                         # DOCUMENTATION
 │   ├── system_context.md            # Hardware Specs
-│   ├── Folder Structure Map.txt     # Template/planned structure
 │   ├── Folder Structure Map - Current.txt   # This file — actual structure
-│   ├── Process_Diagram.md           # Mermaid process flow diagrams
-│   └── Diagram.md.txt               # Original hardware class diagram
+│   └── Process_Diagram.md           # Mermaid process flow diagrams
 │
 ├── 📂 src/                          # SOURCE CODE
 │   ├── __init__.py
-│   ├── config.py                    # Pins, MotorConfig, SensorConfig, VisionConfig (dataclasses)
+│   ├── config.py                    # Pins, MotorConfig, SensorConfig, VisionConfig, InspectionConfig
 │   │
 │   ├── 📂 interfaces/               # TEMPLATES
 │   │   ├── __init__.py
@@ -25,7 +23,8 @@ Sorter_MVP/
 │   │   ├── __init__.py
 │   │   ├── tmc2208.py
 │   │   ├── as5600.py
-│   │   └── imx296_camera.py
+│   │   ├── imx296_camera.py
+│   │   └── vision_inference.py   # TFLite inference engine
 │   │
 │   └── 📂 Controllers/              # BRAINS
 │       ├── __init__.py
