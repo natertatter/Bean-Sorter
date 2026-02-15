@@ -32,6 +32,7 @@ Sorter_MVP/
 │
 ├── 📂 tests/                        # TESTS
 │   ├── test_as5600_live.py          # AS5600 encoder tests
+│   ├── test_camera_vision_desktop.py # GUI: Capture→Inference→Result validation
 │   └── test_tmc2208_interactive.py  # TMC2208 motor driver tests
 │
 ├── LICENSE

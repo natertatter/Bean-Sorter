@@ -6,6 +6,9 @@ tflite-runtime>=2.14.0
 # Vision preprocessing
 opencv-python-headless>=4.8.0
 
+# Desktop GUI (test_camera_vision_desktop.py)
+Pillow>=9.0.0
+
 # Hardware (Raspberry Pi)
 smbus2>=0.4.0
 pyserial>=3.5

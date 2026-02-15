@@ -244,3 +244,67 @@ class TFLiteInference:
         except Exception as e:
             logger.error(f"Inference failed: {e}", exc_info=True)
             return None
+
+    def predict_top_k(
+        self, image_array: np.ndarray, k: int = 3
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Run inference and return top-k predictions.
+
+        Args:
+            image_array: RGB image (H, W, 3), uint8.
+            k: Number of top predictions to return.
+
+        Returns:
+            list: [{'label': str, 'confidence': float}, ...] ordered by confidence desc.
+        """
+        if not self._initialized or self.interpreter is None:
+            return None
+        if image_array is None or image_array.size == 0:
+            return None
+
+        try:
+            if image_array.shape[:2] != (self._input_height, self._input_width):
+                resized = cv2.resize(
+                    image_array,
+                    (self._input_width, self._input_height),
+                    interpolation=cv2.INTER_AREA,
+                )
+            else:
+                resized = image_array
+
+            if self._is_quantized:
+                input_data = (
+                    resized.astype(np.uint8)
+                    if self._input_dtype == np.uint8
+                    else resized.astype(np.int8)
+                )
+            else:
+                input_data = resized.astype(np.float32) / 255.0
+
+            input_data = np.expand_dims(input_data, axis=0)
+            self.interpreter.set_tensor(self._input_index, input_data)
+            self.interpreter.invoke()
+            output = self.interpreter.get_tensor(self._output_index)
+            scores = output[0]
+
+            if self._is_quantized and output.dtype in (np.int8, np.uint8):
+                out_details = self.interpreter.get_output_details()[0]
+                out_scale = out_details.get("quantization_parameters", {}).get("scales", [1.0])
+                out_zp = out_details.get("quantization_parameters", {}).get("zero_points", [0])
+                scale = out_scale[0] if out_scale else 1.0
+                zp = out_zp[0] if out_zp else 0
+                scores = (scores.astype(np.float32) - zp) * scale
+
+            top_indices = np.argsort(scores)[::-1][:k]
+            results = []
+            for idx in top_indices:
+                idx = int(idx)
+                conf = float(scores[idx])
+                label = self.labels[idx] if idx < len(self.labels) else f"Class_{idx}"
+                results.append({"label": label, "confidence": conf})
+            return results
+
+        except Exception as e:
+            logger.error(f"Inference failed: {e}", exc_info=True)
+            return None
